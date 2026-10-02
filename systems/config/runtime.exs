@@ -1,10 +1,21 @@
 import Config
 
-if config_env() == :dev do
+# Local Connector artifact root.
+#
+# In :dev the checkout-local directory is used by default. In any environment an
+# explicit COMMA_DEVICE_CONNECTOR_DIR enables the same local-artifact path; the
+# self-host image uses this because it carries the Connector binaries under
+# /opt/comma/install-artifacts instead of a published release descriptor.
+connector_dir = System.get_env("COMMA_DEVICE_CONNECTOR_DIR")
+
+if is_binary(connector_dir) and connector_dir != "" do
+  config :salix_env, device_install_local_artifact_root: connector_dir
+end
+
+if config_env() == :dev and not is_binary(connector_dir) do
   config :salix_env,
     device_install_local_artifact_root:
-      System.get_env("COMMA_DEVICE_CONNECTOR_DIR") ||
-        Path.expand("../../.local/device-install-artifacts", __DIR__)
+      Path.expand("../../.local/device-install-artifacts", __DIR__)
 end
 
 config :salix_agent,

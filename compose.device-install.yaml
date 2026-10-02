@@ -1,0 +1,38 @@
+# compose.device-install.yaml — local Connector artifact overlay.
+#
+# Purpose: make `device.create_connector_install_command` work on a
+# self-hosted stack that has no Cloudflare R2 release-descriptor publication.
+# It mounts a host directory containing the four Connector binaries under the
+# container's /opt/comma/install-artifacts and points the server at it via
+# COMMA_DEVICE_CONNECTOR_DIR (relaxed in systems/config/runtime.exs to work in
+# any environment, not just :dev).
+#
+# Required host layout (one directory per supported platform):
+#   <root>/linux-amd64/salix-connect
+#   <root>/linux-arm64/salix-connect
+#   <root>/darwin-amd64/salix-connect
+#   <root>/darwin-arm64/salix-connect
+#
+# Usage:
+#   COMMA_DEVICE_CONNECTOR_DIR=/host/path/to/artifacts \
+#     docker compose -f compose.yaml -f compose.device-install.yaml up -d comma
+#   # or set the env var in .env and add this file to COMPOSE_FILE
+#
+# Revert: delete this file (and unset COMMA_DEVICE_CONNECTOR_DIR). The stack
+# falls back to the published release-descriptor path.
+#
+# Only the `comma` service (and `migrate`, via the shared x-comma env) is
+# affected. Deleting this overlay returns the stack to upstream behaviour.
+
+services:
+  comma:
+    environment:
+      COMMA_DEVICE_CONNECTOR_DIR: /opt/comma/install-artifacts
+    volumes:
+      - ${COMMA_DEVICE_CONNECTOR_DIR:-./systems/install-artifacts}:/opt/comma/install-artifacts:ro
+
+  migrate:
+    environment:
+      COMMA_DEVICE_CONNECTOR_DIR: /opt/comma/install-artifacts
+    volumes:
+      - ${COMMA_DEVICE_CONNECTOR_DIR:-./systems/install-artifacts}:/opt/comma/install-artifacts:ro
