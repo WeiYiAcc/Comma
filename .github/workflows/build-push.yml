@@ -1,0 +1,102 @@
+name: build-push
+
+# Build the self-hosted Comma images and push them to GHCR.
+# Triggers: pushes to the fork's default branch (main), and v* tags.
+# Uses GITHUB_TOKEN (no extra registry account needed).
+#
+# Images produced (see compose.yaml / compose.prod.yaml):
+#   ghcr.io/<owner>/comma        <- systems/Dockerfile target runtime (services: migrate, comma)
+#   ghcr.io/<owner>/comma-web    <- selfhost/Web.Dockerfile          (service: web)
+#   ghcr.io/<owner>/comma-minio  <- selfhost/Storage.Dockerfile target minio
+#   ghcr.io/<owner>/comma-mc     <- selfhost/Storage.Dockerfile target mc
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          short="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          owner_lc="$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "short=${short}" >> "$GITHUB_OUTPUT"
+          echo "owner_lc=${owner_lc}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push comma
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: systems/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.owner_lc }}/comma:sha-${{ steps.tags.outputs.short }}
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.owner_lc }}/comma:latest
+          cache-from: type=gha,scope=comma
+          cache-to: type=gha,mode=max,scope=comma
+
+      - name: Build & push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: selfhost/Web.Dockerfile
+          push: true
+          build-args: |
+            COMMA_API_BASE_URL=http://localhost:8081
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.owner_lc }}/comma-web:sha-${{ steps.tags.outputs.short }}
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.owner_lc }}/comma-web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: Build & push minio
+        uses: docker/build-push-action@v6
+        with:
+          context: selfhost
+          file: selfhost/Storage.Dockerfile
+          target: minio
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.owner_lc }}/comma-minio:sha-${{ steps.tags.outputs.short }}
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.owner_lc }}/comma-minio:latest
+          cache-from: type=gha,scope=minio
+          cache-to: type=gha,mode=max,scope=minio
+
+      - name: Build & push mc
+        uses: docker/build-push-action@v6
+        with:
+          context: selfhost
+          file: selfhost/Storage.Dockerfile
+          target: mc
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.owner_lc }}/comma-mc:sha-${{ steps.tags.outputs.short }}
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.owner_lc }}/comma-mc:latest
+          cache-from: type=gha,scope=mc
+          cache-to: type=gha,mode=max,scope=mc

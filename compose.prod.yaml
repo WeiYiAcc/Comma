@@ -1,0 +1,39 @@
+# compose.prod.yaml — pull-based deployment overlay.
+#
+# Usage (from the repository root, alongside the normal compose.yaml):
+#   COMPOSE_PROD_OWNER=weiyiacc COMPOSE_PROD_TAG=sha-abc123def456 \
+#     docker compose -f compose.yaml -f compose.prod.yaml pull
+#   COMPOSE_PROD_OWNER=weiyiacc COMPOSE_PROD_TAG=sha-abc123def456 \
+#     docker compose -f compose.yaml -f compose.prod.yaml up -d
+#
+# This overlay replaces every locally-built image with a GHCR image and removes
+# the build context, so `up` never rebuilds on the server. It does not touch
+# compose.yaml; deleting this file removes the override entirely.
+#
+# Requires Docker Compose v2.24+ for the `!reset` tag (same minimum as
+# DEPLOYMENT.md's self-hosted Compose section).
+#
+# Owner and tag are read from the environment (deploy.sh exports them):
+#   COMPOSE_PROD_OWNER : GHCR namespace (default: weiyiacc)
+#   COMPOSE_PROD_TAG   : image tag to deploy (default: latest)
+#
+# Services overridden: comma (also used by migrate via the x-comma anchor),
+# web, minio, buckets (mc). Official-image services (postgres, redis,
+# clickhouse, mailpit, configure) are unchanged.
+
+x-comma:
+  image: ghcr.io/${COMPOSE_PROD_OWNER:-weiyiacc}/comma:${COMPOSE_PROD_TAG:-latest}
+  build: !reset null
+
+services:
+  minio:
+    image: ghcr.io/${COMPOSE_PROD_OWNER:-weiyiacc}/comma-minio:${COMPOSE_PROD_TAG:-latest}
+    build: !reset null
+
+  buckets:
+    image: ghcr.io/${COMPOSE_PROD_OWNER:-weiyiacc}/comma-mc:${COMPOSE_PROD_TAG:-latest}
+    build: !reset null
+
+  web:
+    image: ghcr.io/${COMPOSE_PROD_OWNER:-weiyiacc}/comma-web:${COMPOSE_PROD_TAG:-latest}
+    build: !reset null
