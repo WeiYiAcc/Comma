@@ -242,3 +242,58 @@ components keep their own licenses. If you serve a modified version, keep the
 
 Contributions require the [AFK AI, Inc. CLA](CLA.md). See
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Selfhost deployment notes (this fork)
+
+Lessons learned running the `ghcr.io/weiyiacc/comma*` images behind a Caddy
+reverse proxy on a small VPS:
+
+### Same-origin `/v1` breaks sign-in ("version out of date")
+
+When the web app calls the API on the **same origin** (e.g. Caddy routes
+`comma.example.com/v1/*` to the API to dodge iOS Safari's cross-subdomain
+cookie blocking), same-origin `GET` requests carry **no `Origin` header**.
+`CommaWeb.ClientSurface` only assigns the `:web_cookie` surface when `Origin`
+matches `web_cookie_origin`, so the probe `GET /v1/comma/auth/session` falls
+into the `native_auth_request?` branch, expects `x-comma-session-transport:
+bearer`, gets `cookie`, and returns `400 invalid_session_transport`. The web
+app maps any protocol error to the "This version of Comma is out of date"
+screen — **refreshing and clearing site data will never fix it**.
+
+Workaround in front (verified 2026-10-18), inject `Origin` for
+cookie-transport requests that lack it:
+
+```caddy
+handle /v1/* {
+    @cookieNoOrigin {
+        not header Origin *
+        header x-comma-session-transport cookie
+    }
+    reverse_proxy @cookieNoOrigin 127.0.0.1:8091 {
+        header_up Origin https://comma.example.com
+    }
+    reverse_proxy 127.0.0.1:8091
+}
+```
+
+The cleaner upstream fix is to detect the cookie surface from the
+`x-comma-session-transport` header instead of Origin alone.
+
+### Login code pitfalls
+
+- Codes live in Redis (`comma:auth:v1:challenge:*`) with a **~15 min TTL** and
+  are bound to the exact `challenge_id` produced by that "Send code" click.
+  Re-sending, double-clicking, or refreshing the page invalidates earlier
+  emails' codes. Only the newest email's code works, immediately.
+- With Mailpit as SMTP, codes land in the Mailpit UI (in this deployment
+  `mailpit.*` sits behind Caddy `basic_auth`).
+
+### Operational gotchas
+
+- After a VPS reboot, Docker's embedded DNS may transiently fail
+  (`postgres:5432 nxdomain`) — the backend then times out and the frontend
+  misreports it as "version out of date". Check `docker logs comma-comma-1`
+  for `DBConnection` errors before believing the UI.
+- The full stack (comma + postgres + redis + clickhouse + minio + web) plus
+  other services can OOM a ~4 GB box; give containers memory limits or add
+  swap.
